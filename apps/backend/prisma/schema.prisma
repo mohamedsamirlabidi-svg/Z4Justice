@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Client {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  company   String?
+  email     String?
+  phone     String?
+  tenantId  String    @db.ObjectId
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  invoices  Invoice[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([company])
+  @@index([name])
+  @@index([tenantId])
+  @@index([tenantId, name])
+}
+
+model Product {
+  id          String        @id @default(auto()) @map("_id") @db.ObjectId
+  sku         String?
+  name        String
+  description String?
+  unitPrice   Float
+  status      String        @default("pending") // "pending" | "verified"
+  tenantId    String        @db.ObjectId
+  tenant      Tenant        @relation(fields: [tenantId], references: [id])
+  items       InvoiceItem[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([sku])
+  @@index([name])
+  @@index([status])
+  @@index([tenantId])
+}
+
+model Invoice {
+  id            String        @id @default(auto()) @map("_id") @db.ObjectId
+  invoiceNo     String
+  date          DateTime
+  dueDate       DateTime?
+  status        String        @default("draft")
+  verified      Boolean       @default(false)
+  clientId      String        @db.ObjectId
+  client        Client        @relation(fields: [clientId], references: [id])
+  totalAmount   Float         @default(0)
+  currency      String        @default("TND")
+  sourceFile    String?
+  logoUrl       String?
+  companyName   String?
+  companyEmail  String?
+  companyPhone  String?
+  paymentTerms  String?
+  sellerAddress String?
+  sellerWebsite String?
+  rib           String?
+  bank          String?
+  consultationRef String?
+  responsable   String?
+  contactName   String?
+  amountInWords String?
+  timbreFiscal  Float?        @default(0.6)
+  totalHT       Float?
+  orderNo       String?
+  documentType  String?       @default("unknown")
+  notes         String?
+  taxRate       Float         @default(0.19)
+  taxAmount     Float         @default(0)
+  items         InvoiceItem[]
+  tenantId      String        @db.ObjectId
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+
+  // F1 — Invoice Status & Flagging Engine
+  paymentStatus       String    @default("not_declared") // 'paid' | 'pending' | 'not_declared'
+  flagStatus          String    @default("none")         // 'green' | 'yellow' | 'orange' | 'red' | 'none'
+  previousFlagStatus  String?
+  flagUpdatedAt       DateTime?
+  lastNotifiedAt      DateTime?   // reserved for F2 notification engine
+  finalWarningSentAt  DateTime?   // reserved for F2 red-flag "1 warning" dedup
+  miseEnDemeureSentAt DateTime?   // reserved for F3 legal-letter dedup
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([tenantId, invoiceNo])
+  @@index([clientId])
+  @@index([status])
+  @@index([documentType])
+  @@index([createdAt])
+  @@index([sourceFile])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, clientId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, flagStatus])
+  @@index([tenantId, dueDate])
+  @@index([tenantId, paymentStatus, dueDate])
+}
+
+model InvoiceItem {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  invoiceId   String   @db.ObjectId
+  productId   String   @db.ObjectId
+  description String?
+  quantity    Float
+  unitPrice   Float
+  lineTotal   Float
+  taxRate     Float    @default(0)
+  taxAmount   Float    @default(0)
+  tenantId    String   @db.ObjectId
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, invoiceId])
+}
+
+model ImportedFile {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  filename    String
+  fullPath    String
+  extension   String
+  detectedAt  DateTime  @default(now())
+  processedAt DateTime?
+  status      String    @default("queued")
+  notes       String?
+  tenantId    String    @db.ObjectId
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, fullPath])
+  @@index([status])
+  @@index([detectedAt])
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+model User {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  email         String
+  name          String
+  passwordHash  String
+  role          String   @default("employee") // "admin" | "manager" | "employee"
+  platformAdmin Boolean  @default(false)
+  tenantId      String?  @db.ObjectId
+  tenant        Tenant?  @relation(fields: [tenantId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, email])
+  @@index([role])
+  @@index([tenantId])
+  @@index([platformAdmin])
+}
+
+model Tenant {
+  id            String         @id @default(auto()) @map("_id") @db.ObjectId
+  name          String
+  slug          String         @unique
+  plan          String         @default("free") // "free" | "basic" | "pro"
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  clients       Client[]
+  products      Product[]
+  invoices      Invoice[]
+  invoiceItems  InvoiceItem[]
+  importedFiles ImportedFile[]
+  users         User[]
+  apiKeys       TenantApiKey[]
+}
+
+model NotificationLog {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId       String   @db.ObjectId
+  invoiceId      String   @db.ObjectId
+  clientId       String?  @db.ObjectId
+  channel        String   // 'sms' | 'email' | 'whatsapp' | 'whatsapp_voice' | 'legal_letter'
+  recipient      String   // phone number, email, WhatsApp number, or contact identifier
+  status         String   // 'sent' | 'failed' | 'skipped_dry_run' | 'skipped_dedup'
+  errorMessage   String?
+  templateKey    String?  // e.g. 'yellow-reminder' | 'orange-firmer' | 'red-final-warning'
+  flagAtSend     String?  // flag color when the notification fired
+  contentPreview String?  // rendered message body, truncated
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, invoiceId])
+  @@index([tenantId, invoiceId, channel, flagAtSend])
+  @@index([tenantId, createdAt])
+}
+
+model TenantApiKey {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  tenantId   String    @db.ObjectId
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+  name       String
+  keyPrefix  String    // First 12 chars of the plaintext key, shown in UI
+  keyHash    String    @unique // SHA-256 of the full key
+  createdBy  String?   @db.ObjectId // User.id who minted it (nullable for signup-time keys)
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  @@index([tenantId])
+  @@index([tenantId, revokedAt])
+  @@index([keyPrefix])
+}

@@ -1,0 +1,240 @@
+import { Request, Response, Router } from 'express';
+import { prisma } from '../../prisma';
+
+export const clientsRouter = Router();
+
+type CompanyKey = 'ACROBATE_SOLUTION' | 'GAMESTREAM_ATLAS' | 'UNKNOWN';
+
+function detectCompany(values: Array<string | null | undefined>): CompanyKey {
+  for (const value of values) {
+    const normalized = (value ?? '').toLowerCase();
+    if (!normalized) continue;
+    if (normalized.includes('acrobate')) return 'ACROBATE_SOLUTION';
+    if (normalized.includes('gamestream') || normalized.includes('atlas')) return 'GAMESTREAM_ATLAS';
+  }
+  return 'UNKNOWN';
+}
+
+clientsRouter.get('/', async (req: Request, res: Response) => {
+  const company = typeof req.query.company === 'string' ? req.query.company : undefined;
+  const clients = await prisma.client.findMany({
+    where: company ? { company } : undefined,
+    orderBy: { createdAt: 'desc' }
+  });
+  res.json(clients);
+});
+
+clientsRouter.get('/summary', async (_req: Request, res: Response) => {
+  const req = _req;
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const company = typeof req.query.company === 'string' ? req.query.company : undefined;
+  const paginated = req.query.paginated === 'true' || typeof req.query.page === 'string' || typeof req.query.pageSize === 'string';
+  const pageRaw = typeof req.query.page === 'string' ? Number(req.query.page) : 1;
+  const pageSizeRaw = typeof req.query.pageSize === 'string' ? Number(req.query.pageSize) : 30;
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
+  const pageSize = Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.min(Math.floor(pageSizeRaw), 200) : 30;
+
+
+
+
+
+
+
+
+
+
+
+
+  const matchStage: Record<string, unknown> = {};
+  if (company === 'ACROBATE_SOLUTION') {
+    matchStage.company = 'ACROBATE_SOLUTION';
+  } else if (company === 'GAMESTREAM_ATLAS') {
+    matchStage.$or = [{ company: 'GAMESTREAM_ATLAS' }, { company: 'GameStream ATLAS' }];
+  }
+
+  if (q) {
+    matchStage.$or = [
+      ...((matchStage.$or as Array<unknown>) || []),
+      { name: { $regex: q, $options: 'i' } },
+      { email: { $regex: q, $options: 'i' } },
+      { phone: { $regex: q, $options: 'i' } }
+    ];
+  }
+
+      const aggregationPipeline: any[] = [
+    { $match: matchStage },
+    { 
+      $lookup: {
+        from: 'Invoice',
+        localField: '_id',
+        foreignField: 'clientId',
+        as: 'invoices'
+      }
+    },
+    {
+      $addFields: {
+        invoiceCount: { $size: '$invoices' },
+        totalBilled: {
+          $sum: {
+            $map: {
+              input: '$invoices',
+              as: 'inv',
+              in: { $toDouble: '$$inv.totalAmount' }
+            }
+          }
+        }
+      }
+    },
+    {
+      $addFields: {
+        outstanding: {
+          $sum: {
+            $map: {
+              input: '$invoices',
+              as: 'inv',
+              in: {
+                $cond: [
+                  { $ne: [{ $toLower: '$$inv.status' }, 'paid'] },
+                  { $toDouble: '$$inv.totalAmount' },
+                  0
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      $project: {
+        id: '$_id',
+        name: 1,
+        company: 1,
+        email: 1,
+        phone: 1,
+        invoiceCount: 1,
+        totalBilled: 1,
+        outstanding: 1,
+        invoices: 1,
+        _id: 0
+        ];
+      }
+    }
+
+  const countPipeline: any[] = [{ $match: matchStage }, { $count: 'total' }];
+  const countResult = await (prisma.client.aggregateRaw as any)(countPipeline);
+  const totalClients = countResult[0]?.total || 0;
+
+  if (paginated) {
+    aggregationPipeline.push({ $skip: (page - 1) * pageSize });
+    aggregationPipeline.push({ $limit: pageSize });
+  }
+
+  const results = await (prisma.client.aggregateRaw as any)(aggregationPipeline);
+
+  const rows = results.map((doc: any) => ({
+    id: doc.id,
+    name: doc.name,
+    company: doc.company,
+    email: doc.email,
+    phone: doc.phone,
+    detectedCompany: detectCompany([doc.company]),
+    invoiceCount: doc.invoiceCount || 0,
+    totalBilled: Number(doc.totalBilled || 0),
+    outstanding: Number(doc.outstanding || 0)
+  }));
+
+  if (!paginated) {
+    return res.json(rows);
+  }
+
+  const totalPages = Math.max(1, Math.ceil(totalClients / pageSize));
+  return res.json({
+    rows,
+    page,
+    pageSize,
+    totalPages
+  });
+});
+
+clientsRouter.get('/:id', async (req: Request, res: Response) => {
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  const includeItems = req.query.includeItems === 'true';
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+
+  if (!id) {
+    return res.status(400).json({ message: 'Missing client id' });
+  }
+
+  const client = await prisma.client.findUnique({
+    where: { id },
+    include: {
+      invoices: {
+        where: status ? { status } : undefined,
+        include: includeItems
+          ? {
+              items: {
+                include: {
+                  product: true
+                }
+              }
+            }
+          : undefined,
+        orderBy: { date: 'desc' }
+      }
+    }
+  });
+
+  if (!client) {
+    return res.status(404).json({ message: 'Client not found' });
+  }
+
+  res.json(client);
+});
+
+clientsRouter.post('/', async (req: Request, res: Response) => {
+  const { name, company, email, phone } = req.body;
+  const created = await prisma.client.create({
+    data: { name, company, email, phone }
+  });
+  res.status(201).json(created);
+});
+
+clientsRouter.put('/:id', async (req: Request, res: Response) => {
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  if (!id) {
+    return res.status(400).json({ message: 'Missing client id' });
+  }
+  const { name, company, email, phone } = req.body;
+
+  const updated = await prisma.client.update({
+    where: { id },
+    data: {
+      name,
+      company,
+      email,
+      phone
+    }
+  });
+
+  res.json(updated);
+});
+
+clientsRouter.delete('/:id', async (req: Request, res: Response) => {
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  if (!id) {
+    return res.status(400).json({ message: 'Missing client id' });
+  }
+  const invoiceCount = await prisma.invoice.count({ where: { clientId: id } });
+
+  if (invoiceCount > 0) {
+    return res.status(409).json({
+      message: 'Cannot delete a client linked to invoices. Remove invoices first.'
+    });
+  }
+
+  await prisma.client.delete({ where: { id } });
+  return res.status(204).send();
+});

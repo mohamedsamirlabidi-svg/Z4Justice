@@ -1,0 +1,32 @@
+version: '3.9'
+services:
+  mongodb:
+    image: mongo:7
+    container_name: mini-erm-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongo
+      MONGO_INITDB_ROOT_PASSWORD: mongo
+      MONGO_INITDB_DATABASE: mini_erm
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  flask-parser:
+    build:
+      context: ../services/flask-parser
+      dockerfile: Dockerfile
+    container_name: mini-erm-flask-parser
+    restart: unless-stopped
+    env_file:
+      - ../services/flask-parser/.env
+    ports:
+      - "5100:5100"
+    volumes:
+      - ../services/flask-parser:/app
+    depends_on:
+      - mongodb
+
+volumes:
+  mongo_data:

@@ -1,0 +1,16 @@
+node_modules/
+.next/
+dist/
+.env
+.env.local
+coverage/
+*.log
+.prisma/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.venv/
+venv/

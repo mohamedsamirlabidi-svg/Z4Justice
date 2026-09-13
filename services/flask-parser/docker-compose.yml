@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  flask-parser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ermplatform-flask-parser
+    ports:
+      - "5100:5100"
+    environment:
+      - FLASK_PORT=5100
+      - LOG_LEVEL=INFO
+      - BACKEND_API_URL=http://host.docker.internal:4000/api
+      - INGEST_API_KEY=${INGEST_API_KEY:-}
+      - WATCH_FOLDERS=/watch
+      - BACKFILL_ON_START=true
+      - SYNC_REQUEST_TIMEOUT_SEC=120
+      - SYNC_RETRY_DELAY_SEC=5
+      - MAX_RETRY_ATTEMPTS=3
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=gpt-4-vision-preview
+    volumes:
+      # Mount local invoice directories
+      - ./watch:/watch
+      - ./logs:/app/logs
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - ermplatform
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  backend:
+    image: node:18-alpine
+    container_name: ermplatform-backend
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - DATABASE_URL=${DATABASE_URL:-}
+    volumes:
+      - ../../../apps/backend:/app
+      - /app/node_modules
+    working_dir: /app
+    command: npm run dev
+    restart: unless-stopped
+    networks:
+      - ermplatform
+
+networks:
+  ermplatform:
+    driver: bridge

@@ -1,0 +1,11 @@
+flask==3.0.3
+watchdog==4.0.1
+openpyxl==3.1.2
+pdfplumber==0.11.0
+pdf2image==1.17.0
+pytesseract==0.3.13
+pandas==2.2.2
+python-dotenv==1.0.1
+requests==2.32.3
+openai==1.35.0
+Pillow==10.3.0

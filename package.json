@@ -1,0 +1,22 @@
+{
+  "name": "mini-erm-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace @mini-erm/backend\" \"npm run dev --workspace @mini-erm/frontend\" \"npm run dev:flask-parser\"",
+    "dev:flask-parser": "services/flask-parser/.venv/Scripts/python.exe services/flask-parser/run.py",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "npm run format --workspaces --if-present",
+    "seed": "npm run seed --workspace @mini-erm/backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "openai": "^6.33.0"
+  }
+}
